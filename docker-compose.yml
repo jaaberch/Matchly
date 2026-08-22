@@ -1,0 +1,189 @@
+# Matchly development stack.
+#
+#   make up        start everything
+#   make migrate   apply database migrations
+#   make seed      load the demo match
+#
+# Everything here is development configuration. Production runs the same images
+# with a managed Postgres, a managed Redis, real object storage and real secrets.
+
+name: matchly
+
+x-python-env: &python-env
+  ENVIRONMENT: development
+  LOG_LEVEL: ${LOG_LEVEL:-INFO}
+  LOG_FORMAT: ${LOG_FORMAT:-console}
+  DATABASE_URL: postgresql+psycopg://matchly:matchly@postgres:5432/matchly
+  REDIS_URL: redis://redis:6379/0
+  JWT_SECRET_KEY: ${JWT_SECRET_KEY:-dev-insecure-change-me}
+  # MinIO stands in for Cloudflare R2 / AWS S3 locally, so the storage code path
+  # under test is the same one that runs in production.
+  STORAGE_BACKEND: ${STORAGE_BACKEND:-s3}
+  STORAGE_BUCKET_ORIGINALS: matchly-originals
+  STORAGE_BUCKET_DERIVED: matchly-derived
+  S3_ENDPOINT_URL: http://minio:9000
+  S3_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-matchly}
+  S3_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-matchly-dev-secret}
+  S3_REGION: us-east-1
+  S3_FORCE_PATH_STYLE: "true"
+  OTP_PROVIDER: ${OTP_PROVIDER:-mock}
+  API_BASE_URL: http://localhost:8000
+  WEB_BASE_URL: http://localhost:3000
+  CORS_ORIGINS: http://localhost:3000
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: matchly
+      POSTGRES_PASSWORD: matchly
+      POSTGRES_DB: matchly
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U matchly -d matchly"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  minio:
+    image: minio/minio:latest
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-matchly}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-matchly-dev-secret}
+    ports:
+      - "${MINIO_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # Creates the two buckets and exits. Originals and derived artefacts are kept
+  # separate so they can have independent retention policies.
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-matchly}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-matchly-dev-secret}
+    entrypoint: ["/bin/sh", "/scripts/init-storage.sh"]
+    volumes:
+      - ./infra/scripts:/scripts:ro
+    restart: "no"
+
+  api:
+    build:
+      context: .
+      dockerfile: infra/docker/api.Dockerfile
+    environment:
+      <<: *python-env
+    ports:
+      - "${API_PORT:-8000}:8000"
+    volumes:
+      # Hot reload: edit on the host, uvicorn restarts in the container.
+      - ./apps/api:/app/apps/api
+      - ./packages/shared:/app/packages/shared
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+
+  video-worker:
+    build:
+      context: .
+      dockerfile: infra/docker/worker.Dockerfile
+    command: ["celery", "-A", "video_worker.worker:app", "worker", "-Q", "video", "-c", "2", "-l", "info"]
+    environment:
+      <<: *python-env
+    volumes:
+      - ./services:/app/services
+      - ./packages/shared:/app/packages/shared
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A video_worker.worker:app inspect ping -d celery@$$HOSTNAME"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+  ai-worker:
+    build:
+      context: .
+      dockerfile: infra/docker/worker.Dockerfile
+    command: ["celery", "-A", "ai_worker.worker:app", "worker", "-Q", "ai", "-c", "1", "-l", "info"]
+    environment:
+      <<: *python-env
+    volumes:
+      - ./services:/app/services
+      - ./packages/shared:/app/packages/shared
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  # Periodic maintenance: retention purge, stale-camera sweep, stuck-job reaper.
+  beat:
+    build:
+      context: .
+      dockerfile: infra/docker/worker.Dockerfile
+    command: ["celery", "-A", "video_worker.worker:app", "beat", "-l", "info"]
+    environment:
+      <<: *python-env
+    volumes:
+      - ./services:/app/services
+      - ./packages/shared:/app/packages/shared
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  web:
+    build:
+      context: .
+      dockerfile: infra/docker/web.Dockerfile
+    environment:
+      # Read by the browser, so it must be the host-visible URL, not the compose name.
+      NEXT_PUBLIC_API_BASE_URL: http://localhost:${API_PORT:-8000}
+      WATCHPACK_POLLING: "true"
+    ports:
+      - "${WEB_PORT:-3000}:3000"
+    volumes:
+      - ./apps/web:/app
+      - /app/node_modules
+      - /app/.next
+    depends_on:
+      - api
+
+volumes:
+  postgres-data:
+  redis-data:
+  minio-data:

@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "matchly-ai-worker"
+version = "0.1.0"
+description = "Player detection, tracking, jersey recognition and highlight scoring"
+requires-python = ">=3.11"
+dependencies = [
+    "matchly-shared",
+    "psycopg[binary]>=3.2,<4",
+    "boto3>=1.34,<2",
+]
+
+# Heavy CV dependencies (opencv, ultralytics, torch) arrive in Phase 5 and are
+# installed only in the ai-worker image, so the API and video worker stay small.
+[project.optional-dependencies]
+cv = []
+
+[tool.setuptools.packages.find]
+include = ["ai_worker*"]

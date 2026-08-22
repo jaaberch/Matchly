@@ -1,0 +1,38 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  /* Referenced by tailwind.config.ts. Defined here as a system stack so the app
+     has no build-time font download; swap in next/font by overriding this
+     variable on <html> and everything follows. */
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, "Noto Sans", sans-serif;
+}
+
+@layer base {
+  html {
+    font-family: var(--font-sans);
+    /* Mobile-first: prevent iOS zoom-on-focus and rubber-band scroll jank. */
+    -webkit-text-size-adjust: 100%;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  body {
+    @apply bg-ink-900 text-ink-100 antialiased;
+  }
+
+  /* Respect the notch / home indicator on phones. */
+  .safe-bottom {
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  .safe-top {
+    padding-top: env(safe-area-inset-top, 0px);
+  }
+}
+
+@layer components {
+  .field-label {
+    @apply block text-sm font-medium text-ink-200;
+  }
+}

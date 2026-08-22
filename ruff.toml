@@ -1,0 +1,22 @@
+# Repo-wide lint configuration. Applies to the API, the shared package and both workers.
+line-length = 100
+target-version = "py311"
+
+[lint]
+select = ["E", "F", "I", "UP", "B", "C4", "SIM"]
+ignore = [
+    "B008",  # FastAPI's Depends() in argument defaults is the documented idiom
+    "E501",  # long lines are caught by the formatter, not the linter
+]
+
+[lint.per-file-ignores]
+# Tests set environment variables before importing the app, which requires
+# imports below module-level statements.
+"apps/api/tests/conftest.py" = ["E402"]
+"apps/api/alembic/versions/*" = ["E501"]
+
+[lint.isort]
+known-first-party = ["app", "matchly_shared", "video_worker", "ai_worker"]
+
+[format]
+docstring-code-format = true
