@@ -8,9 +8,9 @@ without changing the client's read of ``items``/``has_next``.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Generic, TypeVar
+from typing import Annotated, Generic, TypeVar
 
-from fastapi import Query
+from fastapi import Depends, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import Select, func, select
 from sqlalchemy.orm import Session
@@ -35,6 +35,11 @@ def page_params(
     page_size: int = Query(20, ge=1, le=MAX_PAGE_SIZE, description="Items per page"),
 ) -> PageParams:
     return PageParams(page=page, page_size=page_size)
+
+
+#: Use this in routes. A bare ``= page_params`` default would hand the route the
+#: function object instead of resolving it as a dependency.
+PageParamsDep = Annotated[PageParams, Depends(page_params)]
 
 
 class Page(BaseModel, Generic[T]):

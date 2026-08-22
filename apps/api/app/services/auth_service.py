@@ -32,6 +32,7 @@ from matchly_shared.config import Settings
 from matchly_shared.domain import OtpChallenge, RefreshToken, User, UserRole
 from matchly_shared.logging import get_logger
 from matchly_shared.otp import OtpMessage, OtpProvider, generate_code, hash_code, verify_code
+from matchly_shared.timeutil import ensure_utc, utcnow
 
 from ..core.errors import (
     InvalidOtp,
@@ -49,17 +50,6 @@ from ..core.security import (
 )
 
 logger = get_logger(__name__)
-
-
-def _now() -> dt.datetime:
-    return dt.datetime.now(dt.UTC)
-
-
-def _aware(value: dt.datetime | None) -> dt.datetime | None:
-    """SQLite hands back naive datetimes; treat stored times as UTC."""
-    if value is None:
-        return None
-    return value if value.tzinfo else value.replace(tzinfo=dt.UTC)
 
 
 class OtpRequestResult:
@@ -80,7 +70,7 @@ def request_otp(
 ) -> OtpRequestResult:
     phone = normalize_phone(raw_phone)
 
-    window_start = _now() - dt.timedelta(seconds=settings.otp_request_window_seconds)
+    window_start = utcnow() - dt.timedelta(seconds=settings.otp_request_window_seconds)
     recent = session.scalar(
         select(func.count())
         .select_from(OtpChallenge)
@@ -97,7 +87,7 @@ def request_otp(
     challenge = OtpChallenge(
         phone=phone,
         code_hash=hash_code(code, secret=settings.jwt_secret_key),
-        expires_at=_now() + dt.timedelta(seconds=settings.otp_ttl_seconds),
+        expires_at=utcnow() + dt.timedelta(seconds=settings.otp_ttl_seconds),
     )
     session.add(challenge)
     session.flush()
@@ -137,12 +127,12 @@ def verify_otp(
     if challenge is None:
         raise InvalidOtp("No code was requested for this number.")
 
-    expires_at = _aware(challenge.expires_at)
-    if expires_at is not None and expires_at < _now():
+    expires_at = ensure_utc(challenge.expires_at)
+    if expires_at is not None and expires_at < utcnow():
         raise OtpExpired()
 
     if challenge.attempts >= settings.otp_max_attempts:
-        challenge.consumed_at = _now()
+        challenge.consumed_at = utcnow()
         session.commit()  # burn the challenge even though this request fails
         raise TooManyAttempts("Too many incorrect attempts. Request a new code.")
 
@@ -161,7 +151,7 @@ def verify_otp(
         )
         raise InvalidOtp(details={"attempts_remaining": remaining})
 
-    challenge.consumed_at = _now()
+    challenge.consumed_at = utcnow()
     user = _get_or_create_user(session, phone=phone, name=name)
     access_token, expires_in = create_access_token(
         user_id=user.id, role=user.role, settings=settings
@@ -196,7 +186,7 @@ def _issue_refresh_token(session: Session, *, user: User, settings: Settings) ->
         RefreshToken(
             user_id=user.id,
             token_hash=token_hash,
-            expires_at=_now() + dt.timedelta(seconds=settings.refresh_token_ttl_seconds),
+            expires_at=utcnow() + dt.timedelta(seconds=settings.refresh_token_ttl_seconds),
         )
     )
     session.flush()
@@ -214,15 +204,15 @@ def refresh_tokens(
 
     if stored is None or stored.revoked_at is not None:
         raise InvalidToken("This refresh token is no longer valid.")
-    expires_at = _aware(stored.expires_at)
-    if expires_at is not None and expires_at < _now():
+    expires_at = ensure_utc(stored.expires_at)
+    if expires_at is not None and expires_at < utcnow():
         raise InvalidToken("This refresh token has expired.")
 
     user = session.get(User, stored.user_id)
     if user is None or not user.is_active:
         raise InvalidToken()
 
-    stored.revoked_at = _now()
+    stored.revoked_at = utcnow()
     access_token, expires_in = create_access_token(
         user_id=user.id, role=user.role, settings=settings
     )
@@ -240,7 +230,7 @@ def revoke_refresh_token(session: Session, *, raw_refresh_token: str, user_id: u
         )
     ).first()
     if stored is not None and stored.revoked_at is None:
-        stored.revoked_at = _now()
+        stored.revoked_at = utcnow()
 
 
 def revoke_all_refresh_tokens(session: Session, *, user_id: uuid.UUID) -> int:
@@ -250,7 +240,7 @@ def revoke_all_refresh_tokens(session: Session, *, user_id: uuid.UUID) -> int:
             RefreshToken.user_id == user_id, RefreshToken.revoked_at.is_(None)
         )
     ).all()
-    now = _now()
+    now = utcnow()
     for token in tokens:
         token.revoked_at = now
     return len(tokens)

@@ -7,7 +7,18 @@
  *  - turn the API's error envelope into a typed `ApiError` the UI can switch on
  */
 
-import type { ApiErrorBody, Page, RequestOtpResult, TokenPair, User } from "./types";
+import type {
+  ApiErrorBody,
+  MatchDetail,
+  MatchJoinPreview,
+  MatchPlayer,
+  MatchSummary,
+  Page,
+  RequestOtpResult,
+  Team,
+  TokenPair,
+  User,
+} from "./types";
 import { clearTokens, getTokens, storeTokens } from "./auth";
 
 const BASE_URL = (
@@ -133,6 +144,35 @@ export const api = {
         method: "POST",
         body: { refresh_token: refreshToken },
       }),
+  },
+
+  matches: {
+    /** Public: the QR code target, readable before the player has an account. */
+    preview: (joinCode: string) =>
+      request<MatchJoinPreview>(
+        `/api/v1/matches/join/${encodeURIComponent(joinCode)}`,
+        { auth: false },
+      ),
+
+    /** Same endpoint, but signed in — the response then says whether you joined. */
+    previewAsMe: (joinCode: string) =>
+      request<MatchJoinPreview>(`/api/v1/matches/join/${encodeURIComponent(joinCode)}`),
+
+    get: (matchId: string) => request<MatchDetail>(`/api/v1/matches/${matchId}`),
+
+    join: (matchId: string, body: { team: Team; jersey_number: number; consent: boolean }) =>
+      request<MatchPlayer>(`/api/v1/matches/${matchId}/join`, {
+        method: "POST",
+        body,
+      }),
+
+    leave: (matchId: string) =>
+      request<void>(`/api/v1/matches/${matchId}/players/me`, { method: "DELETE" }),
+
+    mine: (scope: "all" | "upcoming" | "past" = "all", pageSize = 20) =>
+      request<Page<MatchSummary>>(
+        `/api/v1/users/me/matches?scope=${scope}&page_size=${pageSize}`,
+      ),
   },
 
   users: {

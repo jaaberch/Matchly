@@ -7,9 +7,11 @@ real production database engine — CI and ``make test-pg`` do exactly that.
 
 from __future__ import annotations
 
+import datetime as dt
 import os
 import tempfile
 from collections.abc import Iterator
+from dataclasses import dataclass
 from pathlib import Path
 
 # Environment must be set before anything imports the settings singleton.
@@ -30,10 +32,24 @@ import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 from sqlalchemy.orm import Session  # noqa: E402
 
+from app.core.security import generate_join_code  # noqa: E402
 from app.main import create_app  # noqa: E402
 from matchly_shared.config import Settings, get_settings  # noqa: E402
 from matchly_shared.db import get_engine, get_session_factory, reset_engine_cache  # noqa: E402
-from matchly_shared.domain import Base  # noqa: E402
+from matchly_shared.domain import (  # noqa: E402
+    Base,
+    Camera,
+    Field,
+    Match,
+    MatchPlayer,
+    MatchStatus,
+    Team,
+    User,
+    UserRole,
+    Venue,
+    VenueMember,
+    VenueRole,
+)
 from matchly_shared.otp import MockOtpProvider, get_otp_provider  # noqa: E402
 from matchly_shared.storage import get_storage  # noqa: E402
 
@@ -105,6 +121,7 @@ class AuthHelper:
 
     def __init__(self, client: TestClient) -> None:
         self.client = client
+        self._sessions: dict[str, dict] = {}
 
     def login(self, phone: str = "+212612345678", name: str | None = "Test Player") -> dict:
         requested = self.client.post("/api/v1/auth/request-otp", json={"phone": phone})
@@ -118,5 +135,126 @@ class AuthHelper:
         assert verified.status_code == 200, verified.text
         return verified.json()
 
-    def headers(self, phone: str = "+212612345678") -> dict[str, str]:
-        return {"Authorization": f"Bearer {self.login(phone)['access_token']}"}
+    def headers(self, phone: str = "+212612345678", name: str | None = None) -> dict[str, str]:
+        """Bearer headers for a phone, signing in once and reusing the token.
+
+        OTP requests are rate limited per number, so a test that needs the same
+        caller several times must not repeat the whole flow each time.
+        """
+        if phone not in self._sessions:
+            self._sessions[phone] = self.login(phone, name=name or "Test Player")
+        return {"Authorization": f"Bearer {self._sessions[phone]['access_token']}"}
+
+    def forget(self, phone: str) -> None:
+        self._sessions.pop(phone, None)
+
+
+# ── Domain factories ─────────────────────────────────────────────────────
+@pytest.fixture
+def factory(db: Session) -> Factory:
+    return Factory(db)
+
+
+class Factory:
+    """Builds domain rows directly.
+
+    Tests use this for *arranging* state — creating a venue with staff through
+    the API every time would bury what each test is actually about. The flows
+    being tested always go through HTTP.
+    """
+
+    def __init__(self, session: Session) -> None:
+        self.session = session
+
+    def _add(self, instance):
+        self.session.add(instance)
+        self.session.commit()
+        return instance
+
+    def user(self, *, phone: str, name: str | None = None, role=UserRole.PLAYER) -> User:
+        return self._add(User(name=name or f"User {phone[-4:]}", phone=phone, role=role))
+
+    def venue(self, *, name: str = "Test Arena", location: str = "Casablanca", **kwargs) -> Venue:
+        return self._add(Venue(name=name, location=location, **kwargs))
+
+    def member(self, *, venue: Venue, user: User, role=VenueRole.MANAGER) -> VenueMember:
+        return self._add(VenueMember(venue_id=venue.id, user_id=user.id, role=role))
+
+    def field(self, *, venue: Venue, name: str = "Pitch 1") -> Field:
+        return self._add(Field(venue_id=venue.id, name=name))
+
+    def camera(self, *, field: Field, name: str = "Cam 1", token: str = "camera-secret") -> Camera:
+        from app.services.venue_service import hash_camera_token
+
+        return self._add(Camera(field_id=field.id, name=name, token_hash=hash_camera_token(token)))
+
+    def match(
+        self,
+        *,
+        field: Field,
+        starts_in_hours: float = 24,
+        duration_minutes: int = 60,
+        status=MatchStatus.SCHEDULED,
+        join_code: str | None = None,
+        title: str | None = "Test match",
+    ) -> Match:
+        starts_at = dt.datetime.now(dt.UTC) + dt.timedelta(hours=starts_in_hours)
+        return self._add(
+            Match(
+                field_id=field.id,
+                starts_at=starts_at,
+                ends_at=starts_at + dt.timedelta(minutes=duration_minutes),
+                status=status,
+                title=title,
+                join_code=join_code or generate_join_code(6),
+            )
+        )
+
+    def player(
+        self, *, match: Match, user: User, team=Team.A, jersey_number: int = 7
+    ) -> MatchPlayer:
+        return self._add(
+            MatchPlayer(
+                match_id=match.id,
+                user_id=user.id,
+                team=team,
+                jersey_number=jersey_number,
+                consent_at=dt.datetime.now(dt.UTC),
+            )
+        )
+
+
+@dataclass
+class VenueSetup:
+    """A venue with a manager, a field and a camera — the usual starting point."""
+
+    venue: Venue
+    field: Field
+    camera: Camera
+    camera_token: str
+    manager_phone: str
+    admin_phone: str
+
+
+@pytest.fixture
+def venue_setup(factory: Factory) -> VenueSetup:
+    factory.user(phone="+212600000900", name="Platform Admin", role=UserRole.ADMIN)
+    manager = factory.user(
+        phone="+212600000901", name="Arena Manager", role=UserRole.VENUE_OPERATOR
+    )
+    venue = factory.venue(
+        name="Arena Test Casablanca",
+        location="Boulevard Zerktouni",
+        recording_disclosure="This pitch is recorded.",
+    )
+    factory.member(venue=venue, user=manager, role=VenueRole.MANAGER)
+    field = factory.field(venue=venue, name="Pitch 1")
+    camera = factory.camera(field=field, token="camera-secret")
+    return VenueSetup(
+        venue=venue,
+        field=field,
+        camera=camera,
+        camera_token="camera-secret",
+        manager_phone="+212600000901",
+        admin_phone="+212600000900",
+    )

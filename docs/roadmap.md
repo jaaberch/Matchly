@@ -25,11 +25,24 @@ authentication.
 - Seed: Arena Demo Casablanca / Pitch 1, both squads, a processed match, 10 fake highlights
 - 97 tests, green on SQLite and on PostgreSQL
 
-## Phase 2 — people and matches
+## Phase 2 — people and matches ✅ complete
 
-Venues, fields, cameras, match CRUD, player check-in, jersey selection with
-duplicate prevention and admin override. Venue-membership permissions on every
-venue-scoped route.
+**Delivered**
+
+- Venues (admin-created), staff onboarding by phone, fields, one camera per field
+- Camera status and capture-agent heartbeat authenticated by a per-camera token
+  issued once at attach time and stored hashed
+- `online` derived from `last_seen`, never read from the `status` column
+- Match scheduling with generated join codes and double-booking protection
+- Public QR check-in preview carrying no player identities
+- Player check-in with consent, jersey duplicate prevention, and an operator
+  override for the cases where a venue decides a clash is acceptable
+- Roster management from the venue side: add, correct, remove
+- Listing scoped by entitlement — admins see all, staff see their venues,
+  players see the matches they joined
+- Web: QR join screen with team/number picker, match page with live roster,
+  home wired to real match data
+- 192 tests, green on SQLite and PostgreSQL
 
 ## Phase 3 — video in
 

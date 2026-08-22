@@ -35,6 +35,7 @@ from sqlalchemy.orm import (
     relationship,
 )
 
+from ..timeutil import ensure_utc, utcnow
 from .columns import GUID, JSONBType, new_uuid
 from .enums import (
     CameraStatus,
@@ -247,6 +248,10 @@ class Camera(Base):
     )
     #: RTSP URL, read by the on-site capture agent only. Never returned to players.
     stream_url: Mapped[str | None] = mapped_column(Text)
+    #: Shared secret the on-site capture agent presents on every heartbeat and
+    #: upload. Stored hashed, like a password; the plaintext is shown once, at
+    #: the moment the camera is attached to a field.
+    token_hash: Mapped[str | None] = mapped_column(String(255))
     last_seen: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[dt.datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
@@ -255,11 +260,15 @@ class Camera(Base):
     field: Mapped[Field] = relationship(back_populates="camera")
 
     def is_online(self, *, offline_after_seconds: int) -> bool:
-        """Online is derived from the heartbeat, never trusted from ``status`` alone."""
-        if self.last_seen is None:
+        """Online is derived from the heartbeat, never trusted from ``status`` alone.
+
+        ``last_seen`` is coerced to UTC because SQLite returns naive datetimes
+        while PostgreSQL returns aware ones, and subtracting the two raises.
+        """
+        last_seen = ensure_utc(self.last_seen)
+        if last_seen is None:
             return False
-        age = dt.datetime.now(dt.UTC) - self.last_seen
-        return age.total_seconds() <= offline_after_seconds
+        return (utcnow() - last_seen).total_seconds() <= offline_after_seconds
 
 
 # ─────────────────────────────────────────────────────────────────────────────

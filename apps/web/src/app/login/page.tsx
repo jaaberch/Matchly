@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { Suspense, useEffect, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 
 import { useSession } from "@/components/SessionProvider";
 import { Button, Input } from "@/components/ui";
@@ -11,8 +11,33 @@ import type { RequestOtpResult } from "@/lib/types";
 type Step = "phone" | "code";
 
 export default function LoginPage() {
+  return (
+    <Suspense fallback={<LoginSkeleton />}>
+      <LoginForm />
+    </Suspense>
+  );
+}
+
+function LoginSkeleton() {
+  return (
+    <div className="space-y-4 py-6" aria-busy="true">
+      <div className="h-8 w-32 animate-pulse rounded bg-ink-800" />
+      <div className="h-12 animate-pulse rounded-xl bg-ink-800" />
+    </div>
+  );
+}
+
+function LoginForm() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { user, signIn } = useSession();
+
+  // Where to go after signing in. Only same-site paths are accepted, so a
+  // crafted link cannot bounce someone off to another origin.
+  const nextParam = searchParams.get("next");
+  const destination = nextParam && nextParam.startsWith("/") && !nextParam.startsWith("//")
+    ? nextParam
+    : "/";
 
   const [step, setStep] = useState<Step>("phone");
   const [phone, setPhone] = useState("");
@@ -24,8 +49,8 @@ export default function LoginPage() {
   const codeRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    if (user) router.replace("/");
-  }, [user, router]);
+    if (user) router.replace(destination);
+  }, [user, router, destination]);
 
   useEffect(() => {
     if (step === "code") codeRef.current?.focus();
@@ -54,7 +79,7 @@ export default function LoginPage() {
     setError(null);
     try {
       signIn(await api.auth.verifyOtp(phone, code, name));
-      router.replace("/");
+      router.replace(destination);
     } catch (caught) {
       setError(messageFor(caught));
     } finally {

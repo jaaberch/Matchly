@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import type { ReactNode } from "react";
 
 import { useSession } from "./SessionProvider";
@@ -16,10 +16,14 @@ import { useSession } from "./SessionProvider";
 export function RequireAuth({ children }: { children: ReactNode }) {
   const { user, loading } = useSession();
   const router = useRouter();
+  const pathname = usePathname();
 
   useEffect(() => {
-    if (!loading && !user) router.replace("/login");
-  }, [loading, user, router]);
+    // Carry the destination so signing in returns the player to where they were.
+    if (!loading && !user) {
+      router.replace(`/login?next=${encodeURIComponent(pathname)}`);
+    }
+  }, [loading, user, router, pathname]);
 
   if (loading) {
     return (

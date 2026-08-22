@@ -7,11 +7,12 @@ code and picking a team and jersey number. When the match ends, the recording is
 uploaded, processed, and turned into per-player highlight clips they can watch
 and share.
 
-> **Status: Phase 1 complete.** Repository structure, architecture, development
-> environment, database schema, API skeleton, phone authentication and the web
-> shell are done and tested. Matches, video upload and the processing pipeline
-> follow in Phases 2–4. See [ARCHITECTURE.md](ARCHITECTURE.md) for the full
-> design and [docs/roadmap.md](docs/roadmap.md) for what lands when.
+> **Status: Phase 2 complete.** The people-and-matches half of the product works
+> end to end: a venue schedules a match, players scan the QR code and check in
+> with a team and shirt number, and everyone sees the roster. Video upload and
+> the processing pipeline follow in Phases 3–4. See
+> [ARCHITECTURE.md](ARCHITECTURE.md) for the full design and
+> [docs/roadmap.md](docs/roadmap.md) for what lands when.
 
 ---
 
@@ -34,6 +35,10 @@ Sign in at http://localhost:3000/login with any phone number — for example
 `0612345678`, or a seeded player such as `+212600000001` (Youssef). The mock OTP
 provider returns the code in the API response and the login screen fills it in,
 so development needs no SMS vendor.
+
+To walk the check-in journey, open http://localhost:3000/match/join/DEMO02 —
+that is what the QR code on the pitch points at. Sign in as
+`+212600000099` (the seeded venue operator) to schedule matches.
 
 ### Without Docker
 

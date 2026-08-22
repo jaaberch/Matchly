@@ -21,6 +21,7 @@ from jose import JWTError, jwt
 
 from matchly_shared.config import Settings
 from matchly_shared.domain import UserRole
+from matchly_shared.timeutil import utcnow
 
 from .errors import InvalidToken
 
@@ -36,16 +37,12 @@ class TokenPayload:
     jti: str
 
 
-def _now() -> dt.datetime:
-    return dt.datetime.now(dt.UTC)
-
-
 def create_access_token(
     *, user_id: uuid.UUID, role: UserRole, settings: Settings
 ) -> tuple[str, int]:
     """Return ``(jwt, expires_in_seconds)``."""
     ttl = settings.access_token_ttl_seconds
-    issued = _now()
+    issued = utcnow()
     claims: dict[str, Any] = {
         "sub": str(user_id),
         "role": role.value,

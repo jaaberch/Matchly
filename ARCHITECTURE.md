@@ -545,7 +545,7 @@ a real SMS. Rate limits: 3 OTP requests / phone / 10 min, 5 verify attempts / ch
 
 | Method | Path | Auth | Notes |
 |---|---|---|---|
-| GET | `/matches` | bearer | filters: `venue_id, field_id, status, from, to` |
+| GET | `/matches` | bearer | Scoped by entitlement (see below); filters `venue_id, field_id, status, from, to` narrow within it |
 | POST | `/matches` | operator | `{field_id, starts_at, ends_at, title?}` → generates `join_code` |
 | GET | `/matches/{id}` | bearer | venue, field, teams, players, status, `video_url`, counts |
 | GET | `/matches/join/{join_code}` | public | check-in preview: venue, field, time, taken jerseys, disclosure |
@@ -561,6 +561,19 @@ a real SMS. Rate limits: 3 OTP requests / phone / 10 min, 5 verify attempts / ch
 `POST /matches/{id}/join` failure codes: `JERSEY_TAKEN`, `MATCH_NOT_JOINABLE`,
 `CONSENT_REQUIRED`, `ALREADY_JOINED`.
 
+**Match visibility.** A roster records who played football where and when, so
+`GET /matches` returns what the caller is entitled to see rather than whatever the
+filters ask for: admins see every match, venue staff see their venues', players
+see the matches they joined. A filter naming someone else's venue returns an empty
+page — not a 403, which would confirm the venue exists.
+
+**Jersey uniqueness is enforced twice.** The service pre-checks so the player gets
+a clear message, and the partial unique index catches the race when two players
+tap `#7` in the same second. The `IntegrityError` is translated back into the same
+`JERSEY_TAKEN` the pre-check would have produced, inside a savepoint so the
+transaction survives. `jersey_override` lifts a row out of that index, which is
+how the administrator override works.
+
 ### 6.5 Venues, fields, cameras
 
 | Method | Path | Notes |
@@ -571,9 +584,15 @@ a real SMS. Rate limits: 3 OTP requests / phone / 10 min, 5 verify attempts / ch
 | GET/POST | `/venues/{id}/fields` | field management |
 | POST | `/fields/{id}/camera` | attach/replace the camera on a field |
 | GET | `/cameras/{id}/status` | `{status, last_seen, online, current_match_id}` |
-| POST | `/cameras/{id}/heartbeat` | camera-token auth; updates `status` + `last_seen` |
+| POST | `/cameras/{id}/heartbeat` | `X-Camera-Token`; updates `status` + `last_seen` |
 
 `online` is derived, not stored: `last_seen > now() - CAMERA_OFFLINE_AFTER_SECONDS`.
+An agent that dies without saying goodbye leaves `status = ONLINE` behind, so the
+column alone would tell a venue everything was fine until after the match.
+
+**Camera credentials.** Attaching a camera returns a token once; only its hash is
+stored. The capture agent is a machine, so it presents that token in
+`X-Camera-Token` rather than holding a user session. Re-attaching rotates it.
 
 ### 6.6 Admin
 
@@ -835,4 +854,9 @@ can render seeded data — before any video or AI code is written.
 match; a phone number logs in end to end via the mock OTP provider; `make test` is green;
 `/docs` lists the implemented endpoints.
 
-Phases 2–7 proceed as specified in the brief, each gated on the previous one being green.
+**Phase 2 is also complete**: venues, staff, fields, cameras, match scheduling,
+the public QR check-in preview, player check-in with consent and jersey rules, and
+roster management. See `docs/roadmap.md` for the current state of each phase.
+
+Phases 3–7 proceed as specified in the brief, each gated on the previous one being
+green.

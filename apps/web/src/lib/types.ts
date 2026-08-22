@@ -50,7 +50,17 @@ export interface RequestOtpResult {
   dev_code: string | null;
 }
 
-/** Present from Phase 2 onwards. */
+export interface VenueRef {
+  id: string;
+  name: string;
+  location: string;
+}
+
+export interface FieldRef {
+  id: string;
+  name: string;
+}
+
 export interface MatchSummary {
   id: string;
   title: string | null;
@@ -58,11 +68,52 @@ export interface MatchSummary {
   starts_at: string;
   ends_at: string;
   join_code: string;
-  venue_name: string;
-  field_name: string;
+  venue: VenueRef;
+  field: FieldRef;
   player_count: number;
   highlight_count: number;
   video_url: string | null;
+}
+
+export interface MatchPlayer {
+  id: string;
+  user_id: string;
+  name: string;
+  avatar: string | null;
+  team: Team;
+  jersey_number: number;
+  jersey_override: boolean;
+  is_me: boolean;
+}
+
+export interface VideoRef {
+  id: string;
+  status: string;
+  duration: number | null;
+}
+
+export interface MatchDetail extends MatchSummary {
+  players: MatchPlayer[];
+  video: VideoRef | null;
+  created_at: string;
+}
+
+/** The public QR landing payload. Carries no player identities by design. */
+export interface MatchJoinPreview {
+  match_id: string;
+  title: string | null;
+  status: MatchStatus;
+  starts_at: string;
+  ends_at: string;
+  venue_name: string;
+  field_name: string;
+  recording_disclosure: string | null;
+  joinable: boolean;
+  taken_jerseys: Record<Team, number[]>;
+  team_sizes: Record<Team, number>;
+  already_joined: boolean;
+  my_team: Team | null;
+  my_jersey_number: number | null;
 }
 
 /** Present from Phase 4 onwards. */
