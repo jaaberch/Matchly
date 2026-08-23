@@ -3,15 +3,21 @@
 from __future__ import annotations
 
 import uuid
+from pathlib import Path
 
 from matchly_shared.domain import Highlight, JobStep, MatchStatus, VideoStatus
+from matchly_shared.highlights import (
+    DetectionRequest,
+    TrackSample,
+    build_detector,
+    select,
+)
 from matchly_shared.logging import get_logger
 from matchly_shared.pipeline import StepContext, StepError, StepSkipped, register_step
 from matchly_shared.storage import keys
 from matchly_shared.timeutil import utcnow
 
 from .. import ffmpeg
-from ..highlights import DetectionRequest, build_detector, select
 from ._source import proxy_source, readable
 
 logger = get_logger(__name__)
@@ -21,13 +27,16 @@ logger = get_logger(__name__)
 def score_events(context: StepContext) -> dict:
     """Find the moments worth watching and write them as highlight rows.
 
-    Rows are created here, before any clip exists, so each one has an id — and
-    therefore a deterministic object key — before CUT_CLIPS runs. That is what
-    makes clip cutting idempotent: a retry overwrites its own file instead of
-    leaving orphans behind.
+    Runs everywhere, always. It asks the detector ladder for the best detector
+    the *available data* supports, so the same step produces track-based
+    highlights on a worker with computer vision and motion-based ones on a worker
+    without — no branching here, no feature flag, and no way for a missing model
+    to cost a match its highlights.
 
-    Re-running replaces the previous selection wholesale rather than adding to
-    it, so a forced re-run cannot double a match's highlights.
+    Rows are created before any clip exists, so each has an id — and therefore a
+    deterministic object key — before CUT_CLIPS runs. That is what makes clip
+    cutting idempotent. Re-running replaces the previous selection wholesale
+    rather than adding to it.
     """
     video = context.video
     if not video.duration:
@@ -39,20 +48,22 @@ def score_events(context: StepContext) -> dict:
     proxy_path = None
     if video.proxy_url:
         candidate_source = proxy_source(context)
-        proxy_path = candidate_source if hasattr(candidate_source, "is_file") else None
+        proxy_path = candidate_source if isinstance(candidate_source, Path) else None
 
-    detector = build_detector("mock")
-    candidates = detector.detect(
-        DetectionRequest(
-            video_id=str(video.id),
-            duration=video.duration,
-            proxy_path=proxy_path,
-            frames=frames,
-            frame_fps=context.settings.frame_sample_fps,
-            has_audio=video.has_audio,
-        )
+    request = DetectionRequest(
+        video_id=str(video.id),
+        duration=video.duration,
+        proxy_path=proxy_path,
+        frames=frames,
+        frame_fps=context.settings.frame_sample_fps,
+        has_audio=video.has_audio,
+        tracks=_track_samples(video),
+        frame_width=video.width,
+        frame_height=video.height,
     )
 
+    detector = build_detector(request)
+    candidates = detector.detect(request)
     windows = select(candidates, duration=video.duration, settings=context.settings)
     if not windows:
         raise StepSkipped("no candidate moments cleared the score threshold")
@@ -67,11 +78,15 @@ def score_events(context: StepContext) -> dict:
     context.storage.delete_prefix(context.derived_bucket, f"videos/{video.id}/clips/")
     context.storage.delete_prefix(context.derived_bucket, f"videos/{video.id}/thumbs/")
 
+    attribution = _attribution_index(video)
     created = []
+    attributed = 0
     for window in windows:
+        player_id = _player_for(window, attribution)
         highlight = Highlight(
             id=uuid.uuid4(),
             match_id=video.match_id,
+            player_id=player_id,
             start_time=window.start,
             end_time=window.end,
             score=window.candidate.score,
@@ -82,6 +97,7 @@ def score_events(context: StepContext) -> dict:
         # CUT_CLIPS without a reload.
         video.highlights.append(highlight)
         created.append(highlight)
+        attributed += 1 if player_id else 0
     context.session.flush()
 
     logger.info(
@@ -90,14 +106,69 @@ def score_events(context: StepContext) -> dict:
             "detector": detector.name,
             "candidates": len(candidates),
             "selected": len(created),
+            "attributed": attributed,
         },
     )
     return {
         "detector": detector.name,
         "candidates": len(candidates),
         "selected": len(created),
+        "attributed": attributed,
         "top_score": max((h.score for h in created), default=0.0),
     }
+
+
+def _track_samples(video) -> list[TrackSample]:
+    """Player positions from the tracking step, if it ran.
+
+    Empty when computer vision was unavailable, which is exactly how the ladder
+    decides to fall back to motion.
+    """
+    samples: list[TrackSample] = []
+    for track in video.tracks:
+        for position in (track.samples or {}).get("positions", []):
+            if len(position) < 5:
+                continue
+            timestamp, x, y, width, height = position[:5]
+            samples.append(
+                TrackSample(
+                    track_ref=track.track_ref,
+                    timestamp=float(timestamp),
+                    x=float(x),
+                    y=float(y),
+                    width=float(width),
+                    height=float(height),
+                )
+            )
+    return samples
+
+
+def _attribution_index(video) -> list[tuple[float, float, object]]:
+    """``(first_seen, last_seen, player_id)`` for tracks with a confident number."""
+    return [
+        (track.first_seen, track.last_seen, track.player_id)
+        for track in video.tracks
+        if track.player_id is not None
+    ]
+
+
+def _player_for(window, attribution: list[tuple[float, float, object]]):
+    """Whose moment this is, if anyone's.
+
+    The player attributed is the one whose track overlaps the clip for longest.
+    Deliberately conservative: a moment involving several identified players
+    still names only one, because a highlight belongs in one person's feed and
+    naming the wrong one is worse than naming nobody.
+    """
+    best_player = None
+    best_overlap = 0.0
+    for first_seen, last_seen, player_id in attribution:
+        overlap = min(window.end, last_seen) - max(window.start, first_seen)
+        if overlap > best_overlap:
+            best_overlap = overlap
+            best_player = player_id
+    # Require a real presence, not a single frame clipping the edge.
+    return best_player if best_overlap >= 1.0 else None
 
 
 @register_step(JobStep.CUT_CLIPS)

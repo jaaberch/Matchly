@@ -84,11 +84,47 @@ two players checked in, two 20-second segments uploaded by the capture-agent
 token, processing queued on a real Celery worker, and three clips — with 9:16
 exports and thumbnails — delivered to the player's phone screen.
 
-## Phase 5 — real computer vision
+## Phase 5 — real computer vision ✅ complete
 
-YOLO player detection, ByteTrack tracking, jersey OCR with temporal voting,
-heuristic highlight scoring. Every component behind an interface, every one
-skippable.
+**Delivered**
+
+- YOLO player detection behind a `PlayerDetector` protocol, restricted to the
+  person class, batched, with a frame cap so a backlog cannot take a day
+- ByteTrack's two-stage association implemented directly: confident detections
+  claim their tracks, then leftovers rescue the ones nothing claimed. That second
+  stage is what keeps a player through an occlusion instead of splitting them
+  into two half-length tracks
+- Jersey recognition that goes back to the **master** for its crops — a player is
+  a few dozen pixels tall on the 640p proxy and the number is unreadable, while
+  the same crop from 4K is legible
+- Confidence-weighted temporal voting with minimum votes, share and margin, and
+  constrained matching against the numbers actually registered at check-in
+- A heuristic detector fusing six signals — motion, acceleration, player density
+  near goals, direction change, audio peaks, clustering — with weights in config
+- Highlight attribution: a clip is credited to the player whose identified track
+  overlaps it longest
+- 340 tests, green on SQLite and PostgreSQL
+
+**The detector ladder.** "Every AI component has a fallback" is now structural
+rather than a convention. Detectors register with a priority and a predicate
+saying what data they need, and the pipeline asks for the best one the *available*
+data supports:
+
+| Priority | Detector | Needs | Where |
+|---|---|---|---|
+| 100 | `heuristic-v1` | player tracks | CV worker |
+| 50 | `motion-v1` | the proxy, or sampled frames | media worker |
+| 0 | `mock-v1` | nothing but a duration | media worker |
+
+A worker without the CV dependencies never registers the top rung, so the ladder
+simply falls through. Nothing catches an ImportError and nothing reads a feature
+flag.
+
+**One architectural correction.** `SCORE_EVENTS` was documented as an AI-queue
+step. It is a *required* step, so a required step living only where the optional
+CV runtime lives would mean no highlights at all whenever detection is
+unavailable — precisely the dependency the design forbids. It now runs anywhere
+and adapts to what it is given. `AI_STEPS` is the three genuinely optional ones.
 
 ## Phase 6 — the product surfaces
 

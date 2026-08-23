@@ -9,14 +9,24 @@ description = "Player detection, tracking, jersey recognition and highlight scor
 requires-python = ">=3.11"
 dependencies = [
     "matchly-shared",
+    "matchly-video-worker",
     "psycopg[binary]>=3.2,<4",
     "boto3>=1.34,<2",
 ]
 
-# Heavy CV dependencies (opencv, ultralytics, torch) arrive in Phase 5 and are
-# installed only in the ai-worker image, so the API and video worker stay small.
 [project.optional-dependencies]
-cv = []
+# The computer-vision runtime. Kept optional on purpose: torch is the largest
+# thing in the deployment by an order of magnitude, and every step that needs it
+# degrades cleanly when it is absent. A worker installed without `[cv]` runs the
+# media pipeline and leaves detection, tracking and jersey reading PENDING.
+cv = [
+    "ultralytics>=8.3,<9",
+    "opencv-python-headless>=4.10,<5",
+    "numpy>=1.26,<3",
+]
+# Jersey reading. Separate from `cv` because a deployment may well want player
+# detection and its density signals without paying for a second model.
+ocr = ["easyocr>=1.7,<2"]
 
 [tool.setuptools.packages.find]
 include = ["ai_worker*"]

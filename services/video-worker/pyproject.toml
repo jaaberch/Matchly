@@ -11,6 +11,10 @@ dependencies = [
     "matchly-shared",
     "psycopg[binary]>=3.2,<4",
     "boto3>=1.34,<2",
+    # Frame differencing for the motion detector. Light, and far cheaper than
+    # parsing ffmpeg's scene-detection output.
+    "numpy>=1.26,<3",
+    "opencv-python-headless>=4.10,<5",
 ]
 
 [tool.setuptools.packages.find]

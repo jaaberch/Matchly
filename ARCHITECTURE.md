@@ -628,7 +628,7 @@ flowchart LR
 | `DETECT_PLAYERS` | ai | YOLO person boxes per sampled frame | skip → motion-only scoring |
 | `TRACK` | ai | ByteTrack over detections | skip → no per-player attribution |
 | `JERSEY_OCR` | ai | crop → jersey region → OCR → temporal vote | skip → unattributed highlights |
-| `SCORE_EVENTS` | ai | signals → candidates → NMS → top 10–20 | hard fail (no highlights = no product) |
+| `SCORE_EVENTS` | video | signals → candidates → NMS → top 10–20 | hard fail (no highlights = no product) |
 | `CUT_CLIPS` | video | ffmpeg clip per highlight, 16:9 (+9:16) | partial: keep the clips that worked |
 | `THUMBNAILS` | video | one JPEG per clip | skip → frontend uses a poster frame |
 | `PERSIST` | video | write highlights, set `MATCH_READY` | hard fail |
@@ -636,6 +636,13 @@ flowchart LR
 **Critical property:** everything from `SAMPLE_FRAMES` to `JERSEY_OCR` is *skippable*. If the
 ai-worker is down, OOMs, or the model file is missing, the match still reaches `READY` with
 motion-based highlights and a full replay. The AI is an enhancement, never a dependency.
+
+`SCORE_EVENTS` runs on the media worker, not the AI queue — a revision the
+implementation forced. It is a *required* step, and a required step that could
+only run where the optional CV runtime lives would mean no highlights at all
+whenever detection is unavailable. It instead adapts to whatever data reached it:
+track-based signals and player attribution when detection ran, motion-only
+scoring when it did not. See §8.
 
 ### 7.2 Orchestration and idempotency
 
@@ -687,6 +694,20 @@ heuristic scorer needs.
   end-to-end flow ship and the frontend be built before any CV exists.
 * `HeuristicHighlightDetector` (Phase 5) — weighted signal fusion.
 
+Selection is a ladder, not a switch. Detectors register with a priority and a
+predicate describing what data they need, and the pipeline asks for the best one
+the *available* data supports:
+
+| Priority | Detector | Needs | Registered by |
+|---|---|---|---|
+| 100 | `heuristic-v1` | player tracks | the CV worker |
+| 50 | `motion-v1` | the proxy, or sampled frames | the media worker |
+| 0 | `mock-v1` | nothing but a duration | the media worker |
+
+A worker without the computer-vision dependencies never registers the top rung,
+so the ladder falls through on its own. Nothing catches an `ImportError`, and
+there is no feature flag to get wrong.
+
 Signals are individually registered and individually optional; each returns a 0–1 series
 over time:
 
@@ -708,9 +729,12 @@ Candidate → clip: `start_time = t - 8s`, `end_time = t + 10s`, clamped to the 
 Overlaps are removed with temporal non-maximum suppression (drop any candidate overlapping a
 higher-scored one by more than 50%), then the top 10–20 by score are kept.
 
-Weights live in configuration, not code. Replacing the whole thing later with a trained
-football-event model means implementing one protocol method — the pipeline, storage, clip
-cutting and API do not change.
+Weights live in configuration, not code, and are **renormalised over the signals a
+given recording actually produced** — otherwise a camera with no microphone would
+quietly cap every score in the match at 0.9.
+
+Replacing the whole thing later with a trained football-event model means implementing one
+protocol method — the pipeline, storage, clip cutting and API do not change.
 
 ---
 
@@ -740,8 +764,16 @@ against `(team, jersey_number)` from check-in. Since check-in gives us the *expe
 numbers per team, OCR only has to pick among ~12 known candidates rather than all of 0–99 —
 much easier, and wrong reads that don't correspond to any registered player are discarded.
 
+A number worn by two players — the administrator override at check-in — is excluded
+from matching entirely, because there is no way to tell those two apart.
+
 If recognition fails entirely, highlights are stored with `player_id = NULL` and surface as
 general match highlights. The product still works.
+
+Attribution is deliberately conservative: a clip is credited to the player whose
+identified track overlaps it longest, and only one player is named even when
+several were involved. A highlight belongs in one person's feed, and naming the
+wrong person is worse than naming nobody.
 
 ---
 
@@ -860,11 +892,11 @@ can render seeded data — before any video or AI code is written.
 match; a phone number logs in end to end via the mock OTP provider; `make test` is green;
 `/docs` lists the implemented endpoints.
 
-**Phases 2, 3 and 4 are also complete.** The product now runs end to end: a
+**Phases 2 to 5 are also complete.** The product now runs end to end: a
 venue schedules a match, players check in by QR code, the recording uploads in
 segments, a worker joins, probes, transcodes and cuts it, and players watch their
-clips. Highlight detection is deliberately a placeholder — Phase 5 replaces
-`MockHighlightDetector` with real computer vision behind the same interface.
+clips, with real computer vision finding the players, following them, reading
+their shirt numbers and crediting the clips accordingly.
 
 Two things the implementation settled that are worth recording here:
 
@@ -876,5 +908,5 @@ Two things the implementation settled that are worth recording here:
   reach `READY` today with the CV steps unwritten, and what will let those steps
   move to a GPU node without touching the orchestration.
 
-See `docs/roadmap.md` for the current state of each phase. Phases 5–7 proceed as
-specified in the brief, each gated on the previous one being green.
+See `docs/roadmap.md` for the current state of each phase. Phases 6 and 7 proceed
+as specified in the brief, each gated on the previous one being green.

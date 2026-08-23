@@ -8,6 +8,11 @@ a highlight row looks like.
 
 Swapping the whole approach later means implementing :meth:`HighlightDetector.detect`.
 Nothing else in the pipeline changes.
+
+The contract lives in the shared package rather than in a worker because both
+workers implement it: the media worker ships a motion-only detector that always
+works, and the CV worker ships one that reads player tracks. Neither imports the
+other.
 """
 
 from __future__ import annotations
@@ -16,21 +21,48 @@ import dataclasses
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
-from matchly_shared.domain import HighlightType
+from ..domain import HighlightType
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class TrackSample:
+    """One player's position at one moment, as produced by the tracking step."""
+
+    track_ref: str
+    timestamp: float
+    #: Normalised 0..1 centre, so a detector never has to know the frame size.
+    x: float
+    y: float
+    width: float
+    height: float
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
 class DetectionRequest:
-    """What a detector gets to work with."""
+    """What a detector gets to work with.
+
+    Everything beyond ``duration`` is optional. A detector must produce something
+    sensible from whatever is present, because the CV steps that fill these in
+    are allowed to be missing.
+    """
 
     video_id: str
     duration: float
     #: Low-resolution copy of the match, on local disk.
-    proxy_path: Path | None
-    #: Sampled frames, if SAMPLE_FRAMES ran. Empty when it was skipped.
-    frames: list[Path]
-    frame_fps: float
-    has_audio: bool
+    proxy_path: Path | None = None
+    #: Sampled frames, if they were extracted. Empty when they were not.
+    frames: list[Path] = dataclasses.field(default_factory=list)
+    frame_fps: float = 2.0
+    has_audio: bool = False
+    #: Player positions over time. Empty unless detection and tracking ran.
+    tracks: list[TrackSample] = dataclasses.field(default_factory=list)
+    #: Frame dimensions of the proxy, when known.
+    frame_width: int | None = None
+    frame_height: int | None = None
+
+    @property
+    def has_tracks(self) -> bool:
+        return bool(self.tracks)
 
 
 @dataclasses.dataclass(frozen=True, slots=True)

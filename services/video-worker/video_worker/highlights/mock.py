@@ -14,8 +14,12 @@ from __future__ import annotations
 import random
 
 from matchly_shared.domain import HighlightType
-
-from .base import Candidate, DetectionRequest, HighlightDetector
+from matchly_shared.highlights import (
+    Candidate,
+    DetectionRequest,
+    HighlightDetector,
+    register_detector,
+)
 
 #: One candidate per this many seconds of play. Selection then trims the list
 #: down to the best 10–20, so this only has to be generous, not accurate.
@@ -77,3 +81,13 @@ def _weighted_type(rng: random.Random) -> HighlightType:
         if roll <= cumulative:
             return kind
     return HighlightType.GENERIC
+
+
+@register_detector("mock", priority=0)
+def _build_mock() -> MockHighlightDetector:
+    """The floor of the ladder: works with nothing but a duration.
+
+    Registered at priority 0 so anything else that can run, does. It exists so a
+    recording always yields *something* — never so it is the intended answer.
+    """
+    return MockHighlightDetector()

@@ -16,6 +16,11 @@ node_modules/
 out/
 *.tsbuildinfo
 
+# Model weights. Downloaded at runtime and cached in the image, never vendored:
+# they are large binaries with their own release cadence.
+*.pt
+*.onnx
+
 # Local state
 .env
 .env.local

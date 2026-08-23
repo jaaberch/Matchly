@@ -135,11 +135,16 @@ services:
       retries: 3
       start_period: 20s
 
+  # The computer-vision worker. Same image, plus the CV extras, and it consumes
+  # both queues: it registers every step, so it can run a whole pipeline
+  # including detection. Point it at a GPU node when there is one.
   ai-worker:
     build:
       context: .
       dockerfile: infra/docker/worker.Dockerfile
-    command: ["celery", "-A", "ai_worker.worker:app", "worker", "-Q", "ai", "-c", "1", "-l", "info"]
+      args:
+        INSTALL_CV: "${INSTALL_CV:-true}"
+    command: ["celery", "-A", "ai_worker.worker:app", "worker", "-Q", "ai,video", "-c", "1", "-l", "info"]
     environment:
       <<: *python-env
     volumes:

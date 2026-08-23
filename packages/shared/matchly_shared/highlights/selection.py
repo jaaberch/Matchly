@@ -9,8 +9,7 @@ from __future__ import annotations
 
 import dataclasses
 
-from matchly_shared.config import Settings
-
+from ..config import Settings
 from .base import Candidate
 
 

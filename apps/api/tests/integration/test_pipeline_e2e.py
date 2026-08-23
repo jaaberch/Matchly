@@ -34,9 +34,13 @@ YOUSSEF = "+212600000801"
 
 
 @pytest.fixture(autouse=True)
-def _steps():
-    """Register the real ffmpeg steps for this module."""
-    import video_worker.steps  # noqa: F401
+def _media_only(without_cv):
+    """This module tests the media worker.
+
+    Explicit about the absence, because whether the computer-vision steps are
+    registered is process-global: another module importing them would otherwise
+    change what these tests exercise depending on run order.
+    """
 
 
 def _put(client: TestClient, url: str, payload: bytes):
@@ -107,7 +111,10 @@ def test_a_recording_becomes_a_match_full_of_clips(
     assert all(h.end_time > h.start_time for h in highlights)
     assert all(h.end_time <= video.duration + 0.5 for h in highlights)
     assert all(0 <= h.score <= 1 for h in highlights)
-    assert all(h.signals.get("detector") == "mock-v1" for h in highlights)
+    # Which detector produced the clips is recorded on every one of them. With a
+    # proxy available and no CV worker in this process, the ladder lands on the
+    # motion detector rather than the mock floor beneath it.
+    assert all(h.signals.get("detector") == "motion-v1" for h in highlights)
 
 
 def test_the_clips_are_real_playable_video(
@@ -152,8 +159,9 @@ def test_every_implemented_step_is_recorded(recorded_match, db: Session, setting
         assert jobs[step].status is JobStatus.SUCCEEDED, f"{step} did not succeed"
         assert jobs[step].attempts == 1
 
-    # The CV steps have no implementation yet; they wait rather than fail, and
-    # the match reaches READY without them.
+    # On a worker without the computer-vision runtime these three have no
+    # implementation. They wait rather than fail, and the match reaches READY
+    # without them.
     for step in (JobStep.DETECT_PLAYERS, JobStep.TRACK, JobStep.JERSEY_OCR):
         assert jobs[step].status is JobStatus.PENDING
 

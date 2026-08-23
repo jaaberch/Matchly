@@ -109,6 +109,30 @@ class Settings(BaseSettings):
     #: 9:16 exports for sharing. Off by default: they double clip-cutting time.
     generate_vertical_clips: bool = True
 
+    # ── Computer vision ──────────────────────────────────────────────────
+    #: Detection runs on the proxy; jersey reading goes back to the master.
+    yolo_weights: str = "yolov8n.pt"
+    yolo_confidence: float = 0.25
+    yolo_image_size: int = 640
+    yolo_batch_size: int = 16
+    #: Cap the frames fed to detection. An hour at 2 fps is 7,200 frames; this is
+    #: the knob that keeps a backlog from taking a day to clear.
+    max_detection_frames: int = 4000
+    jersey_crops_per_track: int = 8
+    jersey_min_votes: int = 3
+    jersey_min_share: float = 0.5
+    jersey_min_margin: float = 0.15
+
+    #: Signal weights for the heuristic scorer. Tunable without a deploy, because
+    #: these will need adjusting against real footage from real pitches.
+    #: Renormalised over whichever signals a given recording actually produced.
+    signal_weight_motion: float = 0.30
+    signal_weight_player_density: float = 0.25
+    signal_weight_acceleration: float = 0.20
+    signal_weight_direction_change: float = 0.10
+    signal_weight_audio_peak: float = 0.10
+    signal_weight_clustering: float = 0.05
+
     # ── Domain knobs ─────────────────────────────────────────────────────
     camera_offline_after_seconds: int = 120
     default_video_retention_days: int = 90
@@ -134,6 +158,17 @@ class Settings(BaseSettings):
     @classmethod
     def _upper_log_level(cls, value: str) -> str:
         return value.upper()
+
+    @property
+    def signal_weights(self) -> dict[str, float]:
+        return {
+            "motion": self.signal_weight_motion,
+            "player_density": self.signal_weight_player_density,
+            "acceleration": self.signal_weight_acceleration,
+            "direction_change": self.signal_weight_direction_change,
+            "audio_peak": self.signal_weight_audio_peak,
+            "clustering": self.signal_weight_clustering,
+        }
 
     @property
     def broker_url(self) -> str:

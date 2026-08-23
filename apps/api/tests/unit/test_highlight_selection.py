@@ -6,7 +6,7 @@ import pytest
 
 from matchly_shared.config import Settings
 from matchly_shared.domain import HighlightType
-from video_worker.highlights import Candidate, select, to_window
+from matchly_shared.highlights import Candidate, select, to_window
 
 
 @pytest.fixture

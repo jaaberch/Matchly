@@ -54,6 +54,50 @@ from matchly_shared.otp import MockOtpProvider, get_otp_provider  # noqa: E402
 from matchly_shared.storage import get_storage  # noqa: E402
 
 
+@pytest.fixture(scope="session", autouse=True)
+def _media_steps() -> None:
+    """Register the media worker's pipeline steps and detectors, once.
+
+    Registration is an import side effect and imports happen once per process,
+    so this is done at session scope and never undone. Tests that need a step or
+    detector *absent* remove that specific entry (see `without_cv`), rather than
+    trying to restore a registry snapshot that would be empty.
+    """
+    import video_worker.steps  # noqa: F401
+
+
+@pytest.fixture
+def without_cv() -> Iterator[None]:
+    """Run as a worker that has no computer-vision runtime.
+
+    Removes the CV steps and the track-based detector for one test, then puts
+    back exactly what was removed.
+    """
+    from matchly_shared.domain import JobStep
+    from matchly_shared.highlights import registry as detector_registry
+    from matchly_shared.pipeline import registry as step_registry
+
+    cv_steps = {
+        step: step_registry._REGISTRY.pop(step)
+        for step in (JobStep.DETECT_PLAYERS, JobStep.TRACK, JobStep.JERSEY_OCR)
+        if step in step_registry._REGISTRY
+    }
+    heuristic = detector_registry._REGISTRY.pop("heuristic", None)
+    try:
+        yield
+    finally:
+        step_registry._REGISTRY.update(cv_steps)
+        if heuristic is not None:
+            detector_registry._REGISTRY["heuristic"] = heuristic
+
+
+@pytest.fixture
+def with_cv() -> None:
+    """Register the computer-vision steps, if this environment has them."""
+    pytest.importorskip("ai_worker.detection")
+    import ai_worker.steps  # noqa: F401
+
+
 @pytest.fixture(scope="session")
 def settings() -> Settings:
     get_settings.cache_clear()

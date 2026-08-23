@@ -3,6 +3,11 @@
 # the build simple while allowing the AI queue to move to a GPU node later.
 FROM python:3.11-slim AS base
 
+# The computer-vision stack (torch, ultralytics, opencv) is by far the largest
+# thing in the deployment. It is opt-in so the media worker stays small, and
+# every step that needs it degrades cleanly when it is absent.
+ARG INSTALL_CV=false
+
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
@@ -27,7 +32,11 @@ RUN mkdir -p /app/packages/shared/matchly_shared \
           /app/services/ai-worker/ai_worker/__init__.py \
  && pip install -e /app/packages/shared[s3,postgres] \
  && pip install -e /app/services/video-worker \
- && pip install -e /app/services/ai-worker
+ && if [ "$INSTALL_CV" = "true" ]; then \
+        pip install -e "/app/services/ai-worker[cv]"; \
+    else \
+        pip install -e /app/services/ai-worker; \
+    fi
 
 COPY packages/shared /app/packages/shared
 COPY services /app/services

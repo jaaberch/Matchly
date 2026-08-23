@@ -7,13 +7,14 @@ code and picking a team and jersey number. When the match ends, the recording is
 uploaded, processed, and turned into per-player highlight clips they can watch
 and share.
 
-> **Status: Phase 4 complete — the product works end to end.** A venue schedules
-> a match, players scan the QR code and check in, the camera's recording is
-> uploaded in segments, a background worker joins, probes, transcodes and cuts
-> it, and players watch their clips. Highlight detection is still a deliberate
-> placeholder: Phase 5 replaces it with real computer vision behind the same
-> interface. See [ARCHITECTURE.md](ARCHITECTURE.md) for the design and
-> [docs/roadmap.md](docs/roadmap.md) for what lands when.
+> **Status: Phase 5 complete.** The product works end to end and now sees the
+> football: YOLO finds the players, ByteTrack follows them, jersey numbers are
+> read from the master and settled by a vote across each track, and highlights
+> are scored from six signals and credited to the player they belong to. All of
+> it degrades — a deployment without the computer-vision runtime still delivers
+> a full replay and motion-scored clips. Phase 6 builds the venue and admin
+> dashboards and sharing. See [ARCHITECTURE.md](ARCHITECTURE.md) for the design
+> and [docs/roadmap.md](docs/roadmap.md) for what lands when.
 
 ---
 
@@ -124,9 +125,11 @@ These hold across every phase:
   and uploads them resumably; a worker crash cannot destroy a match.
 - **Original video is never mutated.** Masters and derived clips live in separate
   buckets with separate lifecycles.
-- **Every AI component has a fallback.** If detection, tracking or jersey OCR
-  fails, the match still reaches `READY` with a full replay and motion-based
-  highlights. The AI is an enhancement, never a dependency.
+- **Every AI component has a fallback**, structurally rather than by convention.
+  Detectors register with a priority and a predicate describing what data they
+  need; the pipeline asks for the best one the *available* data supports. A
+  worker without the CV runtime never registers the top rung and the ladder falls
+  through to motion-based scoring. The AI is an enhancement, never a dependency.
 - **No video work in request handlers.** The API enqueues; workers process.
 - **Jobs are idempotent.** One row per (video, step); retrying resumes at the
   failed step rather than re-transcoding an hour of 4K.

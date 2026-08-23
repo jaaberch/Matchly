@@ -101,13 +101,21 @@ REQUIRED_STEPS: frozenset[JobStep] = frozenset(
     }
 )
 
-#: Steps executed by the AI worker (queue ``ai``); everything else runs on ``video``.
+#: Steps that need the computer-vision runtime. Every one of them is optional:
+#: a worker without the CV dependencies leaves them PENDING and the match still
+#: completes.
+#:
+#: ``SCORE_EVENTS`` is deliberately *not* here even though it consumes CV output.
+#: It is a required step, and a required step that could only run where the
+#: optional CV runtime lives would mean no highlights at all whenever detection
+#: is unavailable — which is exactly the dependency the architecture forbids.
+#: Instead it runs anywhere and adapts: richer signals and player attribution
+#: when tracks exist, motion-only scoring when they do not.
 AI_STEPS: frozenset[JobStep] = frozenset(
     {
         JobStep.DETECT_PLAYERS,
         JobStep.TRACK,
         JobStep.JERSEY_OCR,
-        JobStep.SCORE_EVENTS,
     }
 )
 
