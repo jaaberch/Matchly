@@ -1,0 +1,191 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  # A new push supersedes an in-flight run on the same ref.
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: "3.11"
+  NODE_VERSION: "22"
+
+jobs:
+  # ── Python: the media path, with no computer-vision runtime ────────────
+  #
+  # Deliberately installed *without* the CV extras. That is a real deployment
+  # shape — a venue running media-only — and this job is what proves a match
+  # still completes without detection, tracking or jersey reading.
+  api:
+    name: API and pipeline
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: matchly
+          POSTGRES_PASSWORD: matchly
+          POSTGRES_DB: matchly_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U matchly"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+    env:
+      TEST_DATABASE_URL: postgresql+psycopg://matchly:matchly@localhost:5432/matchly_test
+      DATABASE_URL: postgresql+psycopg://matchly:matchly@localhost:5432/matchly_test
+      REDIS_URL: redis://localhost:6379/0
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      # The pipeline is ffmpeg. Without it the video tests skip silently, which
+      # is why `test_toolchain.py` fails the build when it is missing under CI.
+      - name: Install ffmpeg
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends ffmpeg
+
+      - name: Install packages
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e "packages/shared[s3,postgres]"
+          pip install -e "apps/api[dev]"
+          pip install -e services/video-worker
+          pip install -e services/ai-worker
+
+      - name: Lint
+        run: |
+          ruff check apps packages services infra
+          ruff format --check apps/api packages services infra
+
+      - name: Migrations apply, reverse and re-apply
+        working-directory: apps/api
+        run: |
+          alembic upgrade head
+          alembic downgrade base
+          alembic upgrade head
+
+      - name: Models and migrations agree
+        working-directory: apps/api
+        run: alembic check
+
+      - name: Seed
+        working-directory: apps/api
+        run: python -m app.seed
+
+      - name: Tests
+        working-directory: apps/api
+        run: pytest -q --durations=10
+
+  # ── Python: the same suite with the computer-vision stack ──────────────
+  #
+  # Separate because torch is by far the largest dependency in the project.
+  # Splitting it keeps feedback on the media path fast, and running both proves
+  # the detector ladder behaves at each rung.
+  cv:
+    name: Computer vision
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: matchly
+          POSTGRES_PASSWORD: matchly
+          POSTGRES_DB: matchly_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U matchly"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+    env:
+      TEST_DATABASE_URL: postgresql+psycopg://matchly:matchly@localhost:5432/matchly_test
+      REDIS_URL: redis://localhost:6379/0
+      MATCHLY_REQUIRE_CV: "1"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Install ffmpeg
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends ffmpeg
+
+      - name: Install packages with the CV runtime
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e "packages/shared[s3,postgres]"
+          pip install -e "apps/api[dev]"
+          pip install -e services/video-worker
+          pip install -e "services/ai-worker[cv]"
+
+      - name: Tests
+        working-directory: apps/api
+        run: pytest -q --durations=10
+
+  # ── Web ────────────────────────────────────────────────────────────────
+  web:
+    name: Web
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    defaults:
+      run:
+        working-directory: apps/web
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      - name: Build
+        run: npm run build

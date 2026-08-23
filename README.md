@@ -1,5 +1,7 @@
 # Matchly
 
+[![CI](https://github.com/jaaberch/Matchly/actions/workflows/ci.yml/badge.svg)](https://github.com/jaaberch/Matchly/actions/workflows/ci.yml)
+
 AI-powered football recording and highlights for small pitches.
 
 A fixed 4K camera records a 60-minute match. Players check in by scanning a QR
@@ -98,6 +100,15 @@ TEST_DATABASE_URL=postgresql+psycopg://... make test    # against real Postgres
 
 The same suite runs on both. SQLite keeps the loop fast; the PostgreSQL run is
 what catches things SQLite quietly tolerates, such as column length limits.
+
+CI runs the suite twice on every push and pull request: once **without** the
+computer-vision runtime, which is a real deployment shape and proves a match
+still completes on motion-scored highlights alone, and once **with** it. A third
+job typechecks and builds the web app.
+
+The video tests skip themselves when ffmpeg is missing, which is right on a
+laptop and dangerous in CI — a green tick over nothing. `tests/test_toolchain.py`
+fails the build when the environment claims a runtime it does not have.
 
 ---
 
