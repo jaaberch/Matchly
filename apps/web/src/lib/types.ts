@@ -116,21 +116,6 @@ export interface MatchJoinPreview {
   my_jersey_number: number | null;
 }
 
-/** Present from Phase 4 onwards. */
-export interface Highlight {
-  id: string;
-  match_id: string;
-  player_id: string | null;
-  start_time: number;
-  end_time: number;
-  score: number;
-  type: HighlightType;
-  video_url: string | null;
-  video_url_vertical: string | null;
-  thumbnail_url: string | null;
-  signals: Record<string, number>;
-}
-
 export interface Page<T> {
   items: T[];
   page: number;
@@ -146,4 +131,64 @@ export interface ApiErrorBody {
     details?: Record<string, unknown>;
     request_id?: string;
   };
+}
+
+export type JobStatus = "PENDING" | "RUNNING" | "SUCCEEDED" | "FAILED" | "SKIPPED";
+
+export interface ProcessingJob {
+  id: string;
+  step: string;
+  status: JobStatus;
+  attempts: number;
+  max_attempts: number;
+  last_error: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+}
+
+export interface VideoDetail {
+  id: string;
+  match_id: string;
+  status: string;
+  duration: number | null;
+  size_bytes: number | null;
+  width: number | null;
+  height: number | null;
+  fps: number | null;
+  has_audio: boolean;
+  failure_reason: string | null;
+  jobs: ProcessingJob[];
+  segments: { id: string; segment_index: number; size_bytes: number | null }[];
+  /** Short-lived signed URL; there is no permanent public link. */
+  playback_url: string | null;
+}
+
+export interface HighlightPlayerRef {
+  id: string;
+  name: string;
+  team: Team;
+  jersey_number: number;
+}
+
+export interface Highlight {
+  id: string;
+  match_id: string;
+  start_time: number;
+  end_time: number;
+  duration: number;
+  score: number;
+  type: HighlightType;
+  signals: Record<string, number | string>;
+  video_url: string | null;
+  video_url_vertical: string | null;
+  thumbnail_url: string | null;
+  player: HighlightPlayerRef | null;
+  created_at: string;
+}
+
+export interface MatchHighlights {
+  match_id: string;
+  match_title: string | null;
+  total: number;
+  items: Highlight[];
 }

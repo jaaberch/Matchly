@@ -409,10 +409,50 @@ class Video(Base, TimestampMixin):
     jobs: Mapped[list[ProcessingJob]] = relationship(
         back_populates="video", cascade="all, delete-orphan"
     )
+    #: Ordered by position in the recording, never by arrival time.
+    segments: Mapped[list[VideoSegment]] = relationship(
+        back_populates="video",
+        cascade="all, delete-orphan",
+        order_by="VideoSegment.segment_index",
+    )
     tracks: Mapped[list[PlayerTrack]] = relationship(
         back_populates="video", cascade="all, delete-orphan"
     )
     highlights: Mapped[list[Highlight]] = relationship(back_populates="video")
+
+
+class VideoSegment(Base):
+    """One chunk of a recording as uploaded by the on-site capture agent.
+
+    Recording is segmented rather than streamed as one 60-minute file: local disk
+    is the durability buffer, each segment uploads independently and resumably,
+    and the video is only complete when every expected segment has arrived. A
+    whole-match network outage therefore leaves the match in UPLOADING, not lost.
+    """
+
+    __tablename__ = "video_segments"
+
+    id: Mapped[uuid.UUID] = _pk()
+    video_id: Mapped[uuid.UUID] = mapped_column(
+        GUID(), ForeignKey("videos.id", ondelete="CASCADE"), nullable=False
+    )
+    #: 0-based position in the recording; ordering is by this, never by arrival.
+    #: Named ``segment_index`` because ``index`` is a reserved word in SQL.
+    segment_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    storage_url: Mapped[str] = mapped_column(Text, nullable=False)
+    size_bytes: Mapped[int | None] = mapped_column(BigInteger)
+    duration: Mapped[float | None] = mapped_column(Float)
+    uploaded_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    video: Mapped[Video] = relationship(back_populates="segments")
+
+    __table_args__ = (
+        UniqueConstraint("video_id", "segment_index", name="video_segments_index_unique"),
+        CheckConstraint("segment_index >= 0", name="video_segments_index_positive"),
+    )
 
 
 class ProcessingJob(Base, TimestampMixin):

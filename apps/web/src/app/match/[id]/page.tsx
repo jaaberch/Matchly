@@ -3,12 +3,13 @@
 import { use, useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 
+import { HighlightList } from "@/components/HighlightList";
 import { RequireAuth } from "@/components/RequireAuth";
 import { TeamRoster } from "@/components/TeamRoster";
 import { Button, Card, CardHeader, EmptyState, StatusBadge } from "@/components/ui";
 import { ApiError, api } from "@/lib/api";
 import { formatMatchDate } from "@/lib/format";
-import type { MatchDetail, MatchStatus } from "@/lib/types";
+import type { Highlight, MatchDetail, MatchStatus } from "@/lib/types";
 
 /** Status copy written for a player waiting on their clips, not for an engineer. */
 const PROGRESS: Record<MatchStatus, string | null> = {
@@ -33,12 +34,19 @@ export default function MatchPage({ params }: { params: Promise<{ id: string }> 
 function MatchContent({ matchId }: { matchId: string }) {
   const router = useRouter();
   const [match, setMatch] = useState<MatchDetail | null>(null);
+  const [highlights, setHighlights] = useState<Highlight[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [leaving, setLeaving] = useState(false);
 
   const load = useCallback(async () => {
     try {
-      setMatch(await api.matches.get(matchId));
+      const detail = await api.matches.get(matchId);
+      setMatch(detail);
+      if (detail.status === "READY") {
+        // Clip URLs are signed and short-lived, so they are fetched with the
+        // match rather than cached anywhere.
+        setHighlights((await api.matches.highlights(matchId)).items);
+      }
     } catch (caught) {
       setError(
         caught instanceof ApiError && caught.status === 403
@@ -132,12 +140,17 @@ function MatchContent({ matchId }: { matchId: string }) {
       </Card>
 
       <Card>
-        <CardHeader title="Highlights" />
-        {match.status === "READY" && match.highlight_count > 0 ? (
+        <CardHeader
+          title="Highlights"
+          action={
+            highlights.length > 0 ? (
+              <span className="text-sm text-ink-400">{highlights.length}</span>
+            ) : undefined
+          }
+        />
+        {highlights.length > 0 ? (
           <div className="px-4 pb-4">
-            <p className="text-sm text-ink-200">
-              {match.highlight_count} clips are ready from this match.
-            </p>
+            <HighlightList highlights={highlights} />
           </div>
         ) : (
           <EmptyState

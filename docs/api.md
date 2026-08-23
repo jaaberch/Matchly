@@ -48,6 +48,16 @@ log line for that request.
 | `FIELD_NAME_TAKEN` | 409 | The venue already has a field with that name |
 | `MATCH_NOT_EDITABLE` | 409 | A match can only be edited before it starts |
 | `MATCH_ALREADY_STARTED` | 409 | Too late to leave the match |
+| `MATCH_NOT_STARTABLE` | 409 | The match cannot be started from its current state |
+| `MATCH_NOT_RECORDING` | 409 | Stop was called on a match that is not recording |
+| `NO_CAMERA` | 409 | The field has no camera attached |
+| `MATCH_NOT_UPLOADABLE` | 409 | The match is not accepting a recording |
+| `SEGMENT_MISSING` | 409 | A segment was confirmed but is not in storage |
+| `SEGMENTS_INCOMPLETE` | 409 | Some segments have not arrived yet |
+| `RECORDING_MISSING` | 409 | No recording found in storage |
+| `RECORDING_TOO_SMALL` | 409 | The upload is too small to be a match |
+| `VIDEO_NOT_UPLOADED` | 409 | Processing requested before the upload completed |
+| `QUEUE_UNAVAILABLE` | 503 | The broker is unreachable; the recording is safe |
 
 ### Pagination
 
@@ -259,13 +269,111 @@ and the two do not interchange.
 dies without saying goodbye leaves `status=ONLINE` behind; a dashboard that trusted
 that column would tell a venue everything was fine until after the match.
 
+## Recording
+
+Uploads are authenticated by **either** venue staff or the field's capture agent.
+The agent presents `X-Camera-Token`; it is a machine on the pitch and holds no
+user session.
+
+| Method | Path | Auth | Notes |
+|---|---|---|---|
+| POST | `/matches/{id}/start` | staff | `SCHEDULED\|CHECK_IN → RECORDING`. Idempotent |
+| POST | `/matches/{id}/stop` | staff | `RECORDING → UPLOADING`. Idempotent |
+| POST | `/matches/{id}/video` | staff or agent | Request a presigned PUT target |
+| POST | `/matches/{id}/video/segments` | staff or agent | Confirm a segment arrived |
+| POST | `/matches/{id}/video/complete` | staff or agent | Mark the recording complete |
+| POST | `/matches/{id}/process` | staff | Queue the pipeline; `?force=true` re-runs |
+| GET | `/matches/{id}/video` | participant or staff | Recording and per-step job state |
+
+Start and stop are idempotent because venue staff press them on a phone at the
+side of a pitch — a double tap must never be an error. Starting a match on a
+field with no camera fails with `NO_CAMERA`: that is a setup mistake, and finding
+out after the match is far worse.
+
+### Uploading
+
+Bytes never pass through the API. `POST /matches/{id}/video` returns a presigned
+`PUT` target:
+
+```json
+{
+  "video_id": "…", "kind": "segment", "segment_index": 0,
+  "bucket": "matchly-originals",
+  "storage_key": "matches/…/video/…/segments/00000.mp4",
+  "upload_url": "https://…", "method": "PUT",
+  "expires_at": "2026-08-23T15:00:00Z"
+}
+```
+
+Recording is **segmented**, because local disk on the pitch is the durability
+buffer. Each segment uploads independently and resumably; the agent confirms it
+with `POST /matches/{id}/video/segments`, and the object is verified in storage
+before the confirmation is accepted — a segment can never be marked complete
+without arriving.
+
+`POST /matches/{id}/video/complete` with `expected_segments` finishes the upload,
+and refuses while any index is missing:
+
+```json
+{ "error": { "code": "SEGMENTS_INCOMPLETE",
+             "message": "1 of 3 segments have not arrived.",
+             "details": { "missing": [2], "expected": 3 } } }
+```
+
+A single-file upload is also supported: omit `expected_segments`.
+
+### Processing
+
+`POST /matches/{id}/process` queues the pipeline and returns immediately. No
+video work happens in a request handler. If the broker is unreachable the call
+returns `503 QUEUE_UNAVAILABLE` — the recording is safe, only the processing is
+delayed.
+
+`GET /matches/{id}/video` reports every step:
+
+```json
+{ "status": "PROCESSING",
+  "duration": 3600.5, "width": 3840, "height": 2160, "fps": 29.97,
+  "jobs": [ { "step": "TRANSCODE", "status": "RUNNING", "attempts": 1 },
+            { "step": "DETECT_PLAYERS", "status": "PENDING", "attempts": 0 } ] }
+```
+
+Steps not yet implemented anywhere stay `PENDING` rather than failing, so a match
+still reaches `READY` on the strength of the steps that did run.
+
+## Highlights
+
+| Method | Path | Notes |
+|---|---|---|
+| GET | `/matches/{id}/highlights` | `?player_id=` or `?mine=true` for a personal cut |
+| GET | `/users/me/highlights` | Every clip attributed to you, newest first |
+
+Ordered by when they happened, not by score, so the reel plays as the match did.
+
+Every media link — replay, clip, 9:16 export, thumbnail — is a **short-lived
+signed URL** minted after the caller is authorised. There is no permanent public
+URL for any match video, which is what stops a shared clip becoming a shared
+archive.
+
+```json
+{
+  "id": "…", "start_time": 857.0, "end_time": 875.0, "duration": 18.0,
+  "score": 0.91, "type": "GOAL_AREA_ACTION",
+  "signals": { "motion": 0.94, "player_density": 0.88, "detector": "mock-v1" },
+  "video_url": "https://…", "video_url_vertical": "https://…",
+  "thumbnail_url": "https://…",
+  "player": { "id": "…", "name": "Youssef", "team": "A", "jersey_number": 7 }
+}
+```
+
+`player` is `null` until jersey recognition can attribute a moment — which is the
+normal case until Phase 5. `signals.detector` records which detector produced the
+clip, so a match's highlights can be traced the day the model changes.
+
+
 ## Planned
 
 | Method | Path | Phase |
 |---|---|---|
-| POST | `/matches/{id}/start`, `/stop` | 3 |
-| POST | `/matches/{id}/video` | 3 |
-| POST | `/matches/{id}/process` | 3 |
-| GET | `/matches/{id}/highlights` | 4 |
-| GET | `/users/me/highlights` | 6 |
 | GET | `/admin/overview`, `/admin/jobs`, `/admin/storage` | 6 |
+| POST | `/highlights/{id}/share` | 6 |

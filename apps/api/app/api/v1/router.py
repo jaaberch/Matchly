@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-from . import auth, cameras, matches, users, venues
+from . import auth, cameras, highlights, matches, users, venues, videos
 
 api_router = APIRouter(prefix="/api/v1")
 
@@ -24,4 +24,11 @@ api_router.include_router(matches.router)
 api_router.include_router(matches.venue_matches_router)
 api_router.include_router(matches.me_router)
 
-# Phase 3+: videos, highlights, admin.
+# Phase 3
+api_router.include_router(videos.router)
+
+# Phase 4
+api_router.include_router(highlights.router)
+api_router.include_router(highlights.me_router)
+
+# Phase 6: admin dashboard.

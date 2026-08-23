@@ -20,6 +20,27 @@ def test_cors_origins_accept_a_comma_separated_string() -> None:
     assert settings.cors_origins == ["http://a.test", "http://b.test"]
 
 
+@pytest.mark.parametrize(
+    "raw, expected",
+    [
+        ("http://localhost:3000", ["http://localhost:3000"]),
+        ("http://a.test,http://b.test", ["http://a.test", "http://b.test"]),
+        ("http://a.test, http://b.test", ["http://a.test", "http://b.test"]),
+        ('["http://a.test"]', ["http://a.test"]),
+    ],
+)
+def test_cors_origins_parse_from_the_environment(monkeypatch, raw: str, expected: list) -> None:
+    """The env path, not the constructor path.
+
+    pydantic-settings JSON-decodes list fields straight from the environment,
+    before any validator runs — so a bare ``CORS_ORIGINS=http://localhost:3000``
+    used to crash the process at startup. docker-compose passes exactly that,
+    and constructing Settings(...) directly never exercised it.
+    """
+    monkeypatch.setenv("CORS_ORIGINS", raw)
+    assert Settings().cors_origins == expected
+
+
 def test_broker_falls_back_to_redis_url() -> None:
     settings = Settings(redis_url="redis://cache:6379/2")
     assert settings.broker_url == "redis://cache:6379/2"

@@ -120,6 +120,16 @@ class ObjectStorage(abc.ABC):
         """Short-lived PUT target so large recordings never pass through the API."""
 
     # ── convenience ──────────────────────────────────────────────────────
+    def local_path(self, bucket: str, key: str) -> Path | None:
+        """Filesystem path for an object, when there is one.
+
+        ffmpeg can read either a path or an HTTP URL. Returning a path where one
+        exists avoids copying a 30 GB master just to read its header; the
+        S3-backed implementation returns ``None`` and callers fall back to a
+        signed URL.
+        """
+        return None
+
     def signed_url_for_uri(self, uri: str | None, *, ttl_seconds: int) -> str | None:
         """Resolve a stored URI to a signed link, tolerating ``None``."""
         if not uri:

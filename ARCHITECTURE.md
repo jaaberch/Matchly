@@ -662,6 +662,12 @@ run(step)                                         # updates attempts / timings /
   (worker died mid-step).
 * **Originals are never mutated.** `matchly-originals` is write-once; every derived artefact
   lands in `matchly-derived`. A pipeline bug can therefore never destroy a recording.
+  The one write into the originals bucket is the joined master, under a
+  deterministic key, so a retry overwrites its own output rather than duplicating it.
+
+Implemented in `packages/shared/matchly_shared/pipeline/` (the contract and the
+state machine) and `services/video-worker/video_worker/steps/` (the ffmpeg work).
+The API can read job state without importing ffmpeg or any CV dependency.
 
 ### 7.3 Compute budget (why proxies matter)
 
@@ -854,9 +860,21 @@ can render seeded data — before any video or AI code is written.
 match; a phone number logs in end to end via the mock OTP provider; `make test` is green;
 `/docs` lists the implemented endpoints.
 
-**Phase 2 is also complete**: venues, staff, fields, cameras, match scheduling,
-the public QR check-in preview, player check-in with consent and jersey rules, and
-roster management. See `docs/roadmap.md` for the current state of each phase.
+**Phases 2, 3 and 4 are also complete.** The product now runs end to end: a
+venue schedules a match, players check in by QR code, the recording uploads in
+segments, a worker joins, probes, transcodes and cuts it, and players watch their
+clips. Highlight detection is deliberately a placeholder — Phase 5 replaces
+`MockHighlightDetector` with real computer vision behind the same interface.
 
-Phases 3–7 proceed as specified in the brief, each gated on the previous one being
-green.
+Two things the implementation settled that are worth recording here:
+
+* **Fingerprints cover inputs, never outputs.** `VALIDATE` joins segments and
+  writes `original_url`; if that fed the fingerprint, every run would see changed
+  inputs and re-join an hour of 4K forever. The identity is the upload manifest —
+  the segments as they arrived — which is fixed once the upload completes.
+* **Unimplemented steps stay `PENDING`, not `FAILED`.** That is what lets a match
+  reach `READY` today with the CV steps unwritten, and what will let those steps
+  move to a GPU node without touching the orchestration.
+
+See `docs/roadmap.md` for the current state of each phase. Phases 5–7 proceed as
+specified in the brief, each gated on the previous one being green.

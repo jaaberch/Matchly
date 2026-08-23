@@ -7,11 +7,12 @@ code and picking a team and jersey number. When the match ends, the recording is
 uploaded, processed, and turned into per-player highlight clips they can watch
 and share.
 
-> **Status: Phase 2 complete.** The people-and-matches half of the product works
-> end to end: a venue schedules a match, players scan the QR code and check in
-> with a team and shirt number, and everyone sees the roster. Video upload and
-> the processing pipeline follow in Phases 3–4. See
-> [ARCHITECTURE.md](ARCHITECTURE.md) for the full design and
+> **Status: Phase 4 complete — the product works end to end.** A venue schedules
+> a match, players scan the QR code and check in, the camera's recording is
+> uploaded in segments, a background worker joins, probes, transcodes and cuts
+> it, and players watch their clips. Highlight detection is still a deliberate
+> placeholder: Phase 5 replaces it with real computer vision behind the same
+> interface. See [ARCHITECTURE.md](ARCHITECTURE.md) for the design and
 > [docs/roadmap.md](docs/roadmap.md) for what lands when.
 
 ---
@@ -39,6 +40,12 @@ so development needs no SMS vendor.
 To walk the check-in journey, open http://localhost:3000/match/join/DEMO02 —
 that is what the QR code on the pitch points at. Sign in as
 `+212600000099` (the seeded venue operator) to schedule matches.
+
+To watch a recording go all the way through:
+
+```bash
+make demo    # schedules a match, uploads a generated recording, processes it
+```
 
 ### Without Docker
 

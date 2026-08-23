@@ -8,10 +8,10 @@ refuses to start a non-development process that is still using a dev placeholder
 from __future__ import annotations
 
 import functools
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import Field, field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 DEV_JWT_SECRET = "dev-insecure-change-me"
 
@@ -38,7 +38,13 @@ class Settings(BaseSettings):
     # ── URLs ─────────────────────────────────────────────────────────────
     api_base_url: str = "http://localhost:8000"
     web_base_url: str = "http://localhost:3000"
-    cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:3000"])
+    #: NoDecode, because pydantic-settings JSON-decodes list fields straight from
+    #: the environment — before any validator runs. Without it a perfectly
+    #: ordinary ``CORS_ORIGINS=http://localhost:3000`` crashes the process at
+    #: startup, which is exactly what docker-compose passes.
+    cors_origins: Annotated[list[str], NoDecode] = Field(
+        default_factory=lambda: ["http://localhost:3000"]
+    )
 
     # ── Database ─────────────────────────────────────────────────────────
     database_url: str = "postgresql+psycopg://matchly:matchly@localhost:5432/matchly"
@@ -82,6 +88,27 @@ class Settings(BaseSettings):
     otp_request_window_seconds: int = 600
     otp_expose_dev_code: bool = True  # only honoured when provider is mock/log
 
+    # ── Video processing ─────────────────────────────────────────────────
+    #: Web-playable replay. Never upscaled past the source.
+    replay_height: int = 1080
+    #: Low-resolution copy the CV steps read. 4K detection is ~100x the budget.
+    proxy_height: int = 640
+    frame_sample_fps: float = 2.0
+    transcode_crf: int = 23
+    transcode_preset: str = "veryfast"
+
+    # ── Highlight selection ──────────────────────────────────────────────
+    #: candidate at 14:25 -> clip 14:17 → 14:35
+    highlight_pre_roll_seconds: float = 8.0
+    highlight_post_roll_seconds: float = 10.0
+    highlight_min_count: int = 10
+    highlight_max_count: int = 20
+    #: Drop a candidate overlapping a better one by more than this fraction.
+    highlight_overlap_threshold: float = 0.5
+    highlight_min_score: float = 0.35
+    #: 9:16 exports for sharing. Off by default: they double clip-cutting time.
+    generate_vertical_clips: bool = True
+
     # ── Domain knobs ─────────────────────────────────────────────────────
     camera_offline_after_seconds: int = 120
     default_video_retention_days: int = 90
@@ -90,8 +117,17 @@ class Settings(BaseSettings):
     @field_validator("cors_origins", mode="before")
     @classmethod
     def _split_origins(cls, value: object) -> object:
+        """Accept a comma-separated string, a JSON array, or a real list."""
         if isinstance(value, str):
-            return [origin.strip() for origin in value.split(",") if origin.strip()]
+            text = value.strip()
+            if text.startswith("["):
+                import json
+
+                try:
+                    return json.loads(text)
+                except json.JSONDecodeError:
+                    pass
+            return [origin.strip() for origin in text.split(",") if origin.strip()]
         return value
 
     @field_validator("log_level")

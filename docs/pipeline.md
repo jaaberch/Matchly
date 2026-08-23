@@ -12,17 +12,24 @@ fails, and how to retry it.
 | 2 | `PROBE` | video | duration, fps, resolution, audio | **fail the match** |
 | 3 | `TRANSCODE` | video | 1080p replay + 640p CV proxy | **fail the match** |
 | 4 | `SAMPLE_FRAMES` | video | 2 fps frames from the proxy | skip → generic highlights |
-| 5 | `DETECT_PLAYERS` | ai | YOLO person boxes | skip → motion-only scoring |
-| 6 | `TRACK` | ai | ByteTrack tracks | skip → no attribution |
-| 7 | `JERSEY_OCR` | ai | voted jersey per track | skip → unattributed highlights |
+| 5 | `DETECT_PLAYERS` | ai | YOLO person boxes | **not implemented yet** — stays PENDING |
+| 6 | `TRACK` | ai | ByteTrack tracks | **not implemented yet** — stays PENDING |
+| 7 | `JERSEY_OCR` | ai | voted jersey per track | **not implemented yet** — stays PENDING |
 | 8 | `SCORE_EVENTS` | ai | candidates → NMS → top 10–20 | **fail the match** |
 | 9 | `CUT_CLIPS` | video | one clip per highlight | partial: keep what worked |
 | 10 | `THUMBNAILS` | video | one JPEG per clip | skip → poster frame in the UI |
 | 11 | `PERSIST` | video | write highlights, set `READY` | **fail the match** |
 
 Steps 4–7 are skippable. If the AI worker is down, OOMs, or its model file is
-missing, the match still reaches `READY` with a full replay and motion-based
-highlights. **The AI is an enhancement, never a dependency.**
+missing, the match still reaches `READY` with a full replay and highlights.
+**The AI is an enhancement, never a dependency.**
+
+As of Phase 4, steps 5–7 have no implementation at all — and matches reach
+`READY` anyway. A step nothing can run is recorded `PENDING`, not `FAILED`, which
+is the same mechanism that will let those steps run on a separate GPU worker
+later. `SCORE_EVENTS` currently uses `MockHighlightDetector`, which spreads
+plausible candidates across the recording rather than watching the football; it
+is seeded by video id so re-runs are stable.
 
 ## Idempotency
 

@@ -30,6 +30,7 @@ from .models import (
     Venue,
     VenueMember,
     Video,
+    VideoSegment,
 )
 
 __all__ = [
@@ -60,6 +61,7 @@ __all__ = [
     "VenueMember",
     "VenueRole",
     "Video",
+    "VideoSegment",
     "VideoStatus",
     "new_uuid",
 ]

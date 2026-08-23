@@ -8,7 +8,7 @@ PY      := $(VENV)/bin/python
 PIP     := $(VENV)/bin/pip
 
 .DEFAULT_GOAL := help
-.PHONY: help up down restart logs ps build bootstrap migrate migration seed reset \
+.PHONY: help up down restart logs ps build bootstrap migrate migration seed reset demo \
         test test-pg lint fmt shell psql redis worker-ping openapi
 
 help: ## Show this help
@@ -47,6 +47,9 @@ migration: ## Autogenerate a migration (make migration M="add venues.city")
 
 seed: ## Load the demo match (idempotent)
 	$(API) python -m app.seed
+
+demo: ## Record, upload and process a whole match end to end
+	$(PY) infra/scripts/demo.py --api http://localhost:$${API_PORT:-8000}
 
 reset: ## Drop the database, re-migrate and re-seed
 	$(COMPOSE) down -v

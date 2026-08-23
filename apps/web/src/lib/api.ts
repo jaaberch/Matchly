@@ -12,12 +12,14 @@ import type {
   MatchDetail,
   MatchJoinPreview,
   MatchPlayer,
+  MatchHighlights,
   MatchSummary,
   Page,
   RequestOtpResult,
   Team,
   TokenPair,
   User,
+  VideoDetail,
 } from "./types";
 import { clearTokens, getTokens, storeTokens } from "./auth";
 
@@ -168,6 +170,13 @@ export const api = {
 
     leave: (matchId: string) =>
       request<void>(`/api/v1/matches/${matchId}/players/me`, { method: "DELETE" }),
+
+    highlights: (matchId: string, options: { mine?: boolean } = {}) =>
+      request<MatchHighlights>(
+        `/api/v1/matches/${matchId}/highlights${options.mine ? "?mine=true" : ""}`,
+      ),
+
+    video: (matchId: string) => request<VideoDetail>(`/api/v1/matches/${matchId}/video`),
 
     mine: (scope: "all" | "upcoming" | "past" = "all", pageSize = 20) =>
       request<Page<MatchSummary>>(

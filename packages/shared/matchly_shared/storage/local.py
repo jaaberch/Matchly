@@ -85,6 +85,10 @@ class LocalStorage(ObjectStorage):
     def exists(self, bucket: str, key: str) -> bool:
         return self._path(bucket, key).is_file()
 
+    def local_path(self, bucket: str, key: str) -> Path | None:
+        path = self._path(bucket, key)
+        return path if path.is_file() else None
+
     def stat(self, bucket: str, key: str) -> ObjectInfo:
         path = self._path(bucket, key)
         if not path.is_file():

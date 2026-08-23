@@ -44,16 +44,45 @@ authentication.
   home wired to real match data
 - 192 tests, green on SQLite and PostgreSQL
 
-## Phase 3 — video in
+## Phase 3 — video in ✅ complete
 
-Match start/stop, presigned upload, segment completion, storage wiring, ffprobe
-metadata extraction, `processing_jobs` orchestration, retry and the stuck-job
-reaper.
+**Delivered**
 
-## Phase 4 — end-to-end with a mock detector
+- Idempotent match start/stop; starting refuses a field with no camera
+- Presigned PUT uploads straight to object storage — an 8–30 GB master never
+  passes through the API
+- Segmented recording: each segment is verified in storage before it counts, and
+  the upload is complete only when every index has arrived
+- Uploads authenticated by venue staff *or* the field's capture agent
+- ffprobe metadata extraction: duration, resolution, frame rate, audio
+- `processing_jobs` orchestration: one row per (video, step), fingerprint-based
+  idempotency, per-step errors, required-vs-skippable handling
+- Stuck-job reaper, stale-camera sweep, retention purge on celery beat
+- A broker outage returns a clear 503 saying the recording is safe
 
-ffmpeg clipping, thumbnails, and a `MockHighlightDetector`. The entire journey —
-record, upload, process, deliver — works before any computer vision exists.
+## Phase 4 — end-to-end with a mock detector ✅ complete
+
+The entire journey works: record, upload, process, deliver.
+
+**Delivered**
+
+- TRANSCODE: 1080p replay (faststart, so playback begins immediately) plus a
+  640p CV proxy; neither upscaled past the source
+- SAMPLE_FRAMES: 2 fps sampling for the detection steps
+- SCORE_EVENTS: pluggable `HighlightDetector` with `MockHighlightDetector`,
+  temporal non-maximum suppression, top 10–20 by score
+- CUT_CLIPS: one 16:9 clip per highlight plus a 9:16 social export; a single
+  failed clip costs that clip, not the match
+- THUMBNAILS and PERSIST: highlights without a clip are pruned, then MATCH READY
+- Highlights API with short-lived signed URLs; no permanent public link
+- Web: clips listed on the match page with thumbnails and inline playback
+- 276 tests, green on SQLite and PostgreSQL, including a real ffmpeg run that
+  uploads a recording in segments and asserts the clips it produces
+
+**Verified end to end on the live stack:** a match scheduled through the API,
+two players checked in, two 20-second segments uploaded by the capture-agent
+token, processing queued on a real Celery worker, and three clips — with 9:16
+exports and thumbnails — delivered to the player's phone screen.
 
 ## Phase 5 — real computer vision
 
